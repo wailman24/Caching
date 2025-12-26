@@ -1,0 +1,15 @@
+{
+  "name": "cache-example-express",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --no-cache src/index.ts"
+  },
+  "dependencies": {
+    "@btn/cache": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0"
+  }
+}
