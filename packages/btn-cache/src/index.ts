@@ -286,6 +286,41 @@ export class BTNCache<T = any> extends EventEmitter {
   }
 
   /**
+   * Function to get the data of the cache
+   * @returns the statistics of the cache
+   */
+  public getStats() {
+    return this.stats;
+  }
+
+  /**
+   *  Function to flush all the data and the statistics of the cache
+   */
+  public flushAll() {
+    this.data = new Map();
+    this.stats = {
+      keys: 0,
+      vsize: 0,
+      ksize: 0,
+      hits: 0,
+      misses: 0,
+    };
+  }
+
+  /**
+   * Function to flush the statistics of the cache
+   */
+  public flushStats() {
+    this.stats = {
+      keys: 0,
+      vsize: 0,
+      ksize: 0,
+      hits: 0,
+      misses: 0,
+    };
+  }
+
+  /**
    * This function will evict a data point based on the set options
    * @param numberOfEvictions number of keys that will get evicted, defaults to 1
    */
