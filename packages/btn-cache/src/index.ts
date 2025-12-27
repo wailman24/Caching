@@ -269,6 +269,23 @@ export class BTNCache<T = any> extends EventEmitter {
   }
 
   /**
+   * Function to get metadata about the key, such as TTL, time since last accessed, number of accesses
+   * @param key key for the lookup
+   * @returns metadata information about the key.
+   */
+  public getMeta(key: string | number) {
+    const found = this.data.get(key);
+
+    if (found && this._checkData(key, found)) {
+      return {
+        lastAccessTime: found.lastAccessTimeStamp,
+        numberOfAccesses: found.numberOfAccess,
+        ttl: found.ttl,
+      };
+    }
+  }
+
+  /**
    * This function will evict a data point based on the set options
    * @param numberOfEvictions number of keys that will get evicted, defaults to 1
    */
