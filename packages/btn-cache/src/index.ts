@@ -197,6 +197,29 @@ export class BTNCache<T = any> extends EventEmitter {
   }
 
   /**
+   * Function to get a key while removing it from the cache
+   * @param key Key to be taken out of the cache
+   * @returns value that was stored to that key
+   */
+  public take(key: string | number) {
+    const found = this.get(key);
+    if (found) {
+      this.del([key]);
+    }
+    return found;
+  }
+
+  /**
+   * Function to check if a key is present in the cache
+   * @param key key for the lookup
+   * @returns a boolean value specifying if the value is present.
+   */
+  public has(key: string | number) {
+    const found = this.data.get(key);
+    return found && this._checkData(key, found);
+  }
+
+  /**
    * Function to delete a certain set of keys from the cache
    * @emits "del" Indicates that the data has been deleted successfully
    * @param keys The array of keys to be deleted.
