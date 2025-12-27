@@ -70,6 +70,23 @@ export class BTNCache<T = any> extends EventEmitter {
   private stats: CacheStats;
   private checkTimeout!: NodeJS.Timeout;
 
+  /**
+   * Creates a new in memory cache using the options given to the constructor
+   * @param options the options object: \
+   * **evictionPolicy**: the type of eviction policy, one of RANDOM, LRU, LFU. (default: RANDOM)\
+   * **deleteOnExpire**: if the data gets deleted when it expires. \
+   * **maxKeys**: maximum amount of keys that can be stored in the cache, defaults to -1 (unlimited) \
+   * **useClones**: if the get and set operators copy the entered/received data or return a reference \
+   * **checkPeriod**: how often the cache runs an invalidation check. \
+   *
+   * **invalidationPolicy**: the type of invalidation policy, one of NONE, TTL or EVENT. (default: TTL) \
+   *
+   * When *invalidationPolicy == "TTL"*:
+   * **stdTTL**: the standard time to live on any data point unless specified other wise.
+   *
+   * When *invalidationPolicy == "EVENT"*:
+   * **predicate**: function that given a data point's state, returns if it should be considered invalid or not.
+   */
   constructor(options: CacheOptionsInput<T> = {}) {
     super();
 
@@ -336,10 +353,17 @@ export class BTNCache<T = any> extends EventEmitter {
     } as CacheOptions<T>;
   }
 
+  /**
+   * Function to close the cache.
+   */
   public close() {
     if (this.checkTimeout) clearTimeout(this.checkTimeout);
   }
 
+  /**
+   * Internal function to check the keys for expiration
+   * @param start decides if the next check will happen
+   */
   private _checkClock(start: boolean = true) {
     for (const [key, value] of this.data.entries()) {
       this._checkData(key, value);
