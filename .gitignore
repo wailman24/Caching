@@ -1,0 +1,7 @@
+# Cursor IDE rules
+.cursor/
+
+# OS files
+.DS_Store
+Thumbs.db
+
