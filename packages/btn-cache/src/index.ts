@@ -6,6 +6,7 @@ type BaseCacheOptions = {
   deleteOnExpire: boolean;
   maxKeys: number;
   useClones: boolean;
+  checkPeriod: number;
 };
 
 type invalidationPolicyOptions<T> =
@@ -60,12 +61,14 @@ const DEFAULT_OPTIONS: CacheOptions<unknown> = {
   invalidationPolicy: "TTL",
   stdTTL: 500,
   useClones: true,
+  checkPeriod: 300,
 };
 
 export class BTNCache<T = any> extends EventEmitter {
   private data = new Map<string | number, StoredData<T>>();
   private options: CacheOptions<T>;
   private stats: CacheStats;
+  private checkTimeout!: NodeJS.Timeout;
 
   constructor(options: CacheOptionsInput<T> = {}) {
     super();
@@ -89,6 +92,8 @@ export class BTNCache<T = any> extends EventEmitter {
       ksize: 0,
       vsize: 0,
     };
+
+    this._checkClock();
   }
 
   /**
@@ -329,6 +334,26 @@ export class BTNCache<T = any> extends EventEmitter {
       ...newOptions,
       ...this.options,
     } as CacheOptions<T>;
+  }
+
+  public close() {
+    if (this.checkTimeout) clearTimeout(this.checkTimeout);
+  }
+
+  private _checkClock(start: boolean = true) {
+    for (const [key, value] of this.data.entries()) {
+      this._checkData(key, value);
+    }
+
+    if (start && this.options.checkPeriod) {
+      this.checkTimeout = setTimeout(
+        () => this._checkClock(start),
+        this.options.checkPeriod * 1000
+      );
+      this.checkTimeout.unref();
+    }
+
+    return;
   }
 
   /**
