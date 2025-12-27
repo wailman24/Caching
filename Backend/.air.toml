@@ -1,0 +1,10 @@
+[build]
+cmd = "go build -o main ./cmd/cacheApp"
+bin = "main"
+dir = "."
+include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml", "toml", "env"]
+exclude_dir = ["vendor", "tmp"]
+run_after_build = "chmod +x main"
+
+[log]
+level = "debug"
