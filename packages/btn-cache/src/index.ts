@@ -92,7 +92,9 @@ export class BTNCache<T = any> extends EventEmitter {
   }
 
   /**
-   * Retrieves a data point from the cache, emits a "miss" event on a cache miss
+   * Retrieves a data point from the cache
+   * @emits "miss" Indicates that a cache miss happened
+   * @emits "get" Indicates that a cache hit happened
    * @param key Key of the data to retrieve
    */
   public get(key: string | number) {
@@ -102,7 +104,7 @@ export class BTNCache<T = any> extends EventEmitter {
       found.numberOfAccess++;
       found.lastAccessTimeStamp = Date.now();
       this.emit("get", key, found);
-      return found;
+      return this._unwrap(found);
     } else {
       this.stats.misses++;
       this.emit("miss", key);
@@ -111,16 +113,44 @@ export class BTNCache<T = any> extends EventEmitter {
   }
 
   /**
+   * Method to get many keys at once
+   * @emits "miss" Indicates that a cache miss happened
+   * @emits "get" Indicates that a cache hit happened
+   * @param keys Array of keys
+   * @returns
+   */
+  public many_get(keys: (string | number)[]) {
+    let all_found: {
+      [key: string | number]: T;
+    } = {};
+
+    for (const key of keys) {
+      const found = this.data.get(key);
+      if (found && this._checkData(key, found)) {
+        this.stats.hits++;
+        found.numberOfAccess++;
+        found.lastAccessTimeStamp = Date.now();
+        all_found[key] = this._unwrap(found);
+        this.emit("get", key, found);
+      } else {
+        this.stats.misses++;
+        this.emit("miss", key);
+      }
+    }
+
+    return all_found;
+  }
+
+  /**
    * Function to set a certain key in the cache.
    * @param key   Key of the data to be set.
    * @param data  The data to be entered into the cache.
    * @param ttl   The TTL of the new data point, will be ignored if the invalidation policy isn't set to TTL
+   * @emits "set" Indicates that the data has been set successfully
    * @returns
    */
   public set(key: string | number, data: T, ttl?: number) {
-    if (this.options.maxKeys > -1 && this.stats.keys >= this.options.maxKeys) {
-      this._evictData();
-    }
+    this._checkAndEvict();
 
     if (this.options.invalidationPolicy == "TTL" && !ttl) {
       ttl = this.options.stdTTL;
@@ -146,8 +176,23 @@ export class BTNCache<T = any> extends EventEmitter {
     return true;
   }
 
+  public many_set(keyValueSet: {
+    [key: string | number]: {
+      ttl?: number;
+      data: T;
+    };
+  }) {
+    this._checkAndEvict(Object.keys(keyValueSet).length);
+
+    for (const keyValuePair of Object.entries(keyValueSet)) {
+      const [key, { ttl, data }] = keyValuePair;
+      this.set(key, data, ttl);
+    }
+  }
+
   /**
-   * Function to delete a certain set of keys from the cache, emits a "del" event after each deletion with the deleted value.
+   * Function to delete a certain set of keys from the cache
+   * @emits "del" Indicates that the data has been deleted successfully
    * @param keys The array of keys to be deleted.
    * @returns Number of elements deleted from the cache.
    */
@@ -170,8 +215,22 @@ export class BTNCache<T = any> extends EventEmitter {
 
   /**
    * This function will evict a data point based on the set options
+   * @param numberOfEvictions number of keys that will get evicted, defaults to 1
    */
-  private _evictData() {}
+  private _evictData(numberOfEvictions: number = 1) {}
+
+  /**
+   * Internal function to check if the cache is full, if so evict data according to the eviction policy
+   * @param [padding=0] How big the empty space should be.
+   */
+  private _checkAndEvict(padding: number = 0) {
+    if (
+      this.options.maxKeys > -1 &&
+      this.stats.keys + padding >= this.options.maxKeys
+    ) {
+      this._evictData(padding);
+    }
+  }
 
   /**
    * Internal method to roughly calculate the size of the value
@@ -189,6 +248,7 @@ export class BTNCache<T = any> extends EventEmitter {
 
   /**
    * Internal method to check if a data point is invalidated or not.
+   * @emits "expired" Indicates that some data has been invalidated.
    * @param key   The key of the checked data
    * @param data  The Stored data
    * @returns If the data is invalidated or not
@@ -228,12 +288,8 @@ export class BTNCache<T = any> extends EventEmitter {
       asClone = false;
     }
 
-    if (data.value) {
-      if (asClone) return clone(data.value);
-      else return data.value;
-    }
-
-    return null;
+    if (asClone) return clone(data.value);
+    else return data.value;
   }
 
   /**
