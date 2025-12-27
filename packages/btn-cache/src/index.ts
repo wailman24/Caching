@@ -321,6 +321,17 @@ export class BTNCache<T = any> extends EventEmitter {
   }
 
   /**
+   * Function to change some of the settings of the cache
+   * @param newOptions
+   */
+  public setSettings(newOptions: CacheOptionsInput<T>) {
+    this.options = {
+      ...newOptions,
+      ...this.options,
+    } as CacheOptions<T>;
+  }
+
+  /**
    * This function will evict a data point based on the set options
    * @param numberOfEvictions number of keys that will get evicted, defaults to 1
    */
