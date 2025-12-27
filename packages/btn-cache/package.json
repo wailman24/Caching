@@ -18,7 +18,11 @@
     "build": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/clone": "^2.1.4",
     "@types/node": "^25.0.3",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "clone": "^2.1.2"
   }
 }
