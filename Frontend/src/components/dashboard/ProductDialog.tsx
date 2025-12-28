@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
+import { loadAllProducts } from '@/store/cacheStore'
 import {
   Dialog,
   DialogContent,
@@ -48,22 +49,24 @@ export function ProductDialog({ open, onOpenChange, product }: ProductDialogProp
   })
 
   useEffect(() => {
-    if (product) {
-      reset({
-        name: product.name,
-        price: product.price,
-        category: product.category,
-        stock: product.stock,
-      })
-    } else {
-      reset({
-        name: '',
-        price: 0,
-        category: '',
-        stock: 0,
-      })
+    if (open) {
+      if (product) {
+        reset({
+          name: product.name,
+          price: product.price,
+          category: product.category,
+          stock: product.stock,
+        })
+      } else {
+        reset({
+          name: '',
+          price: 0,
+          category: '',
+          stock: 0,
+        })
+      }
     }
-  }, [product, reset])
+  }, [open, product, reset])
 
   const onSubmit = async (data: ProductFormData) => {
     setIsLoading(true)
@@ -76,8 +79,10 @@ export function ProductDialog({ open, onOpenChange, product }: ProductDialogProp
       } else {
         await addProduct(data)
         toast.success('Product Added', {
-          description: `${data.name} has been added to the cache`,
+          description: `${data.name} has been added to the database and cache`,
         })
+        // Reload products from backend to update the list
+        await loadAllProducts()
       }
       onOpenChange(false)
       reset()

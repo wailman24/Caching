@@ -9,6 +9,7 @@ type User struct {
 
 type UserLogin struct {
 	ID       uint   `json:"id" `
+	Name     string `json:"name,omitempty"` // Added name field
 	Email    string `json:"email"  validate:"required,email"`
 	Password string `json:"password" validate:"required"`
 }

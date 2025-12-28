@@ -1,8 +1,9 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useCacheStore } from '@/store/cacheStore'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -42,13 +43,21 @@ const profileSchema = z.object({
 type ProfileFormData = z.infer<typeof profileSchema>
 
 export default function Profile() {
-  const { user, updateProfile, updateAvatar } = useAuthStore()
+  const { user, isAuthenticated, updateProfile, updateAvatar } = useAuthStore()
   const { metrics, getCachedProducts } = useCacheStore()
   const [isEditing, setIsEditing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const navigate = useNavigate()
 
   const products = getCachedProducts()
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      navigate('/login')
+    }
+  }, [isAuthenticated, user, navigate])
 
   const {
     register,
@@ -67,10 +76,14 @@ export default function Profile() {
     },
   })
 
-  const getInitials = (name: string) => {
+  const getInitials = (name: string | undefined) => {
+    if (!name || name.trim() === '') {
+      return 'U' // Default to 'U' for User if no name
+    }
     return name
       .split(' ')
       .map(n => n[0])
+      .filter(Boolean)
       .join('')
       .toUpperCase()
       .slice(0, 2)
@@ -156,7 +169,16 @@ export default function Profile() {
     setIsEditing(false)
   }
 
-  if (!user) return null
+  // Show loading or nothing while checking authentication
+  if (!isAuthenticated || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <p className="text-muted-foreground">Redirecting to login...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -182,9 +204,9 @@ export default function Profile() {
               <div className="flex flex-col sm:flex-row sm:items-end gap-4 -mt-16 mb-6">
                 <div className="relative group">
                   <Avatar className="h-32 w-32 border-4 border-background shadow-xl">
-                    <AvatarImage src={user.avatar} alt={user.name} />
+                    <AvatarImage src={user.avatar} alt={user.name || user.email} />
                     <AvatarFallback className="text-3xl bg-gradient-to-br from-green-500 to-emerald-600 text-white">
-                      {getInitials(user.name)}
+                      {getInitials(user.name || user.email)}
                     </AvatarFallback>
                   </Avatar>
                   <button
@@ -203,7 +225,7 @@ export default function Profile() {
                 </div>
 
                 <div className="flex-1 pb-2">
-                  <h2 className="text-2xl font-bold">{user.name}</h2>
+                  <h2 className="text-2xl font-bold">{user.name || user.email}</h2>
                   <p className="text-muted-foreground">{user.email}</p>
                 </div>
 
@@ -274,7 +296,7 @@ export default function Profile() {
                         )}
                       </div>
                     ) : (
-                      <p className="text-sm p-3 rounded-lg bg-secondary/30">{user.name}</p>
+                      <p className="text-sm p-3 rounded-lg bg-secondary/30">{user.name || user.email}</p>
                     )}
                   </div>
 

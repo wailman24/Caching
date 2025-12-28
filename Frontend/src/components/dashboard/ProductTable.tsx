@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
 import {
   ColumnDef,
@@ -55,47 +55,110 @@ export function ProductTable() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
 
-  const { 
-    getCachedProducts, 
-    getProduct, 
-    deleteProduct, 
-    loadingProducts 
-  } = useCacheStore()
+  // Use Zustand selector to get cache directly and convert to array
+  // This ensures we only re-render when cache actually changes
+  const cache = useCacheStore((state) => state.cache)
+  const products = useMemo(() => Array.from(cache.values()), [cache])
   
-  const products = getCachedProducts()
-  const availableProducts = getAvailableProducts()
+  const getProduct = useCacheStore((state) => state.getProduct)
+  const deleteProduct = useCacheStore((state) => state.deleteProduct)
+  const loadingProducts = useCacheStore((state) => state.loadingProducts)
+  
+  // Use state to force re-render when availableProducts changes
+  const [availableProducts, setAvailableProducts] = useState(() => getAvailableProducts())
+  
+  // Update availableProducts when cache changes or when loadAllProducts is called
+  useEffect(() => {
+    // Update available products list
+    // This ensures "Fetch from Backend" section updates when cache changes
+    const updateProducts = () => {
+      const products = getAvailableProducts()
+      setAvailableProducts(products)
+    }
+    
+    // Update immediately
+    updateProducts()
+    
+    // Listen for custom event when loadAllProducts updates availableProductsCache
+    const handleAvailableProductsUpdate = () => {
+      updateProducts()
+    }
+    
+    // Check periodically for changes (fallback in case event doesn't fire)
+    const interval = setInterval(updateProducts, 1000)
+    
+    window.addEventListener('availableProductsUpdated', handleAvailableProductsUpdate)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('availableProductsUpdated', handleAvailableProductsUpdate)
+    }
+  }, [cache, loadingProducts])
 
-  const handleFetchProduct = async (id: string, name: string) => {
+  const handleFetchProduct = useCallback(async (id: string, name: string) => {
     setLoadingId(id)
+    
+    // Get current metrics and cache state BEFORE the fetch to determine if it's a HIT or MISS
+    const stateBefore = useCacheStore.getState()
+    const hitsBefore = stateBefore.metrics.cacheHits
+    const missesBefore = stateBefore.metrics.cacheMisses
+    const wasInLocalCache = stateBefore.cache.has(id) // Check cache BEFORE fetch
+    
+    // Fetch from backend - backend uses cache-aside strategy
+    // If in Redis cache: Cache HIT (fast)
+    // If not in Redis: Cache MISS (fetches from DB, then caches)
     const result = await getProduct(id)
     setLoadingId(null)
     
     if (result) {
-      // Check if it was a hit or miss based on whether it was already in cache
-      const wasInCache = products.some(p => p.id === id)
-      if (wasInCache) {
+      // Check metrics after fetch to determine if it was a HIT or MISS
+      const stateAfter = useCacheStore.getState()
+      const hitsAfter = stateAfter.metrics.cacheHits
+      const missesAfter = stateAfter.metrics.cacheMisses
+      
+      // If hits increased, it was a CACHE HIT
+      // If misses increased, it was a CACHE MISS
+      if (hitsAfter > hitsBefore) {
         toast.success('Cache Hit!', {
-          description: `${name} retrieved instantly from cache`,
+          description: `${name} retrieved from local cache (Backend may have used Redis cache)`,
+          duration: 3000,
+        })
+      } else if (missesAfter > missesBefore) {
+        toast.warning('Cache Miss', {
+          description: `${name} fetched from backend (Backend checked Redis, then DB if needed)`,
           duration: 3000,
         })
       } else {
-        toast.warning('Cache Miss', {
-          description: `${name} fetched from database (1s delay)`,
-          duration: 3000,
-        })
+        // Fallback: use the cache state we checked BEFORE the fetch
+        if (wasInLocalCache) {
+          toast.success('Cache Hit!', {
+            description: `${name} retrieved from local cache (Backend may have used Redis cache)`,
+            duration: 3000,
+          })
+        } else {
+          toast.warning('Cache Miss', {
+            description: `${name} fetched from backend (Backend checked Redis, then DB if needed)`,
+            duration: 3000,
+          })
+        }
       }
+    } else {
+      toast.error('Product not found', {
+        description: `Could not fetch ${name} from backend`,
+        duration: 3000,
+      })
     }
-  }
+  }, [getProduct])
 
-  const handleDelete = (product: Product) => {
+  const handleDelete = useCallback((product: Product) => {
     deleteProduct(product.id)
     toast.error('Product Evicted', {
       description: `${product.name} removed from cache`,
       duration: 3000,
     })
-  }
+  }, [deleteProduct])
 
-  const columns: ColumnDef<Product>[] = [
+  const columns: ColumnDef<Product>[] = useMemo(() => [
     {
       accessorKey: 'name',
       header: ({ column }) => (
@@ -202,33 +265,63 @@ export function ProductTable() {
         const product = row.original
         
         return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only">Open menu</span>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => setEditingProduct(product)}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem 
-                onClick={() => handleDelete(product)}
-                className="text-red-500 focus:text-red-500"
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete from Cache
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleFetchProduct(product.id, product.name)}
+              disabled={loadingProducts.has(product.id) || loadingId === product.id}
+              className="text-xs"
+            >
+              {(loadingProducts.has(product.id) || loadingId === product.id) ? (
+                <>
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  Fetching...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Fetch
+                </>
+              )}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  className="h-8 w-8 p-0 hover:bg-muted"
+                  aria-label="Open actions menu"
+                >
+                  <span className="sr-only">Open menu</span>
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuItem 
+                  onClick={() => {
+                    setEditingProduct(product)
+                  }}
+                  className="cursor-pointer"
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit Product
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => handleDelete(product)}
+                  className="text-red-500 focus:text-red-500 cursor-pointer"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete from Cache
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )
       },
     },
-  ]
+  ], [handleDelete, setEditingProduct])
 
   const table = useReactTable({
     data: products,
@@ -244,8 +337,11 @@ export function ProductTable() {
     },
   })
 
-  const uncachedProducts = availableProducts.filter(
-    p => !products.some(cached => cached.id === p.id)
+  const uncachedProducts = useMemo(() => 
+    availableProducts.filter(
+      p => !products.some(cached => cached.id === p.id)
+    ),
+    [availableProducts, products]
   )
 
   return (
@@ -266,9 +362,10 @@ export function ProductTable() {
                 <Input
                   placeholder="Search products..."
                   value={(table.getColumn('name')?.getFilterValue() as string) ?? ''}
-                  onChange={(event) =>
-                    table.getColumn('name')?.setFilterValue(event.target.value)
-                  }
+                  onChange={(event) => {
+                    const value = event.target.value
+                    table.getColumn('name')?.setFilterValue(value)
+                  }}
                   className="pl-9 w-[200px]"
                 />
               </div>
@@ -286,8 +383,8 @@ export function ProductTable() {
             <div className="mb-6 p-4 rounded-lg bg-secondary/30 border border-border">
               <div className="flex items-center gap-2 mb-3">
                 <Clock className="w-4 h-4 text-orange-500" />
-                <span className="text-sm font-medium">Fetch from Database</span>
-                <span className="text-xs text-muted-foreground">(Simulates 1s delay on cache miss)</span>
+                <span className="text-sm font-medium">Fetch from Backend</span>
+                <span className="text-xs text-muted-foreground">(Backend uses Cache-Aside: Redis → DB if needed)</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {uncachedProducts.map(product => (
@@ -353,10 +450,20 @@ export function ProductTable() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={columns.length} className="h-32 text-center">
-                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                        <Database className="w-8 h-8 opacity-50" />
-                        <p>No products in cache</p>
-                        <p className="text-xs">Fetch products from the database to populate the cache</p>
+                      <div className="flex flex-col items-center gap-4 text-muted-foreground">
+                        <Database className="w-12 h-12 opacity-50" />
+                        <div>
+                          <p className="font-medium mb-1">No products found</p>
+                          <p className="text-xs mb-3">The database is empty. Create your first product to get started!</p>
+                          <Button 
+                            onClick={() => setIsAddDialogOpen(true)}
+                            size="sm"
+                            className="mt-2"
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Create First Product
+                          </Button>
+                        </div>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -372,13 +479,15 @@ export function ProductTable() {
         onOpenChange={setIsAddDialogOpen}
       />
       
-      {editingProduct && (
-        <ProductDialog 
-          open={!!editingProduct}
-          onOpenChange={(open) => !open && setEditingProduct(null)}
-          product={editingProduct}
-        />
-      )}
+      <ProductDialog 
+        open={!!editingProduct}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingProduct(null)
+          }
+        }}
+        product={editingProduct || undefined}
+      />
     </>
   )
 }

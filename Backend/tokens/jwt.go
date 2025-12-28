@@ -9,10 +9,9 @@ import (
 )
 
 func CreateToken(user_id int) (string, error) {
-	err := godotenv.Load()
-	if err != nil {
-		return "", err
-	}
+	// Try to load .env file, but don't fail if it doesn't exist
+	// (variables might be set via environment or docker-compose)
+	_ = godotenv.Load()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256,
 		jwt.MapClaims{

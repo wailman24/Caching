@@ -1,24 +1,52 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Product, CacheMetrics, CacheEvent } from '@/types'
-import { delay } from '@/lib/utils'
+import { productAPI } from '@/lib/api'
 
 // Maximum cache size in bytes (simulated 1MB RAM)
 const MAX_CACHE_SIZE = 1024 * 1024
 
-// Sample products to simulate database
-const DATABASE_PRODUCTS: Omit<Product, 'lastAccessed' | 'accessCount' | 'createdAt'>[] = [
-  { id: 'p1', name: 'MacBook Pro 16"', price: 2499, category: 'Electronics', stock: 15, size: 2048 },
-  { id: 'p2', name: 'iPhone 15 Pro', price: 1199, category: 'Electronics', stock: 50, size: 1536 },
-  { id: 'p3', name: 'Sony WH-1000XM5', price: 399, category: 'Audio', stock: 30, size: 1024 },
-  { id: 'p4', name: 'iPad Air', price: 799, category: 'Electronics', stock: 25, size: 1792 },
-  { id: 'p5', name: 'AirPods Pro', price: 249, category: 'Audio', stock: 100, size: 768 },
-  { id: 'p6', name: 'Samsung Galaxy S24', price: 999, category: 'Electronics', stock: 40, size: 1536 },
-  { id: 'p7', name: 'Dell XPS 15', price: 1799, category: 'Electronics', stock: 20, size: 2048 },
-  { id: 'p8', name: 'Bose QC45', price: 329, category: 'Audio', stock: 35, size: 1024 },
-  { id: 'p9', name: 'Apple Watch Ultra', price: 799, category: 'Wearables', stock: 18, size: 1280 },
-  { id: 'p10', name: 'Nintendo Switch OLED', price: 349, category: 'Gaming', stock: 45, size: 1536 },
-]
+// Backend Product type (simplified)
+interface BackendProduct {
+  id: number
+  name: string
+  price: string
+}
+
+// Categories for random assignment when fetching from backend
+const CATEGORIES = ['Electronics', 'Audio', 'Wearables', 'Gaming', 'Accessories']
+
+// Convert backend product to frontend product
+const convertBackendProduct = (backendProduct: BackendProduct, cachedData?: Partial<Product>): Product => {
+  const price = parseFloat(backendProduct.price) || 0
+  const size = cachedData?.size || Math.floor(Math.random() * 1024) + 512 // Random size if not cached
+  
+  // Generate random stock (10-100) and category if not in cache or if default values
+  // This simulates real data since backend doesn't store stock/category
+  // If stock is 0 or category is 'General' (default values), regenerate them
+  const hasValidStock = cachedData?.stock !== undefined && cachedData.stock > 0
+  const hasValidCategory = cachedData?.category !== undefined && cachedData.category !== 'General'
+  
+  const stock = hasValidStock 
+    ? (cachedData.stock as number)
+    : Math.floor(Math.random() * 91) + 10 // Random between 10-100
+  
+  const category = hasValidCategory
+    ? (cachedData.category as string)
+    : CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)]
+  
+  return {
+    id: backendProduct.id.toString(),
+    name: backendProduct.name,
+    price,
+    category,
+    stock,
+    size,
+    lastAccessed: cachedData?.lastAccessed || Date.now(),
+    accessCount: cachedData?.accessCount || 0,
+    createdAt: cachedData?.createdAt || Date.now(),
+  }
+}
 
 interface CacheState {
   // Cache data (simulating RAM)
@@ -38,7 +66,7 @@ interface CacheState {
   addProduct: (product: Omit<Product, 'id' | 'lastAccessed' | 'accessCount' | 'createdAt' | 'size'>) => Promise<Product>
   updateProduct: (id: string, updates: Partial<Product>) => Promise<Product | null>
   deleteProduct: (id: string) => void
-  clearCache: () => void
+  clearCache: () => Promise<void>
   resetMetrics: () => void
   
   // Computed
@@ -70,10 +98,21 @@ export const useCacheStore = create<CacheState>()(
         if (cache.has(id)) {
           // CACHE HIT - instant return
           const product = cache.get(id)!
+          
+          // If product has invalid stock/category (default values), update them
+          let productToUpdate = product
+          if (product.stock === 0 || product.category === 'General') {
+            productToUpdate = {
+              ...product,
+              stock: Math.floor(Math.random() * 91) + 10, // Random between 10-100
+              category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
+            }
+          }
+          
           const updatedProduct = {
-            ...product,
+            ...productToUpdate,
             lastAccessed: Date.now(),
-            accessCount: product.accessCount + 1,
+            accessCount: productToUpdate.accessCount + 1,
           }
           cache.set(id, updatedProduct)
           
@@ -102,18 +141,116 @@ export const useCacheStore = create<CacheState>()(
           return updatedProduct
         }
         
-        // CACHE MISS - simulate database fetch with delay
+        // CACHE MISS - fetch from backend API
         set(s => ({
           loadingProducts: new Set(s.loadingProducts).add(id),
         }))
         
-        // Simulate 1 second database delay
-        await delay(1000)
-        
-        // Find product in "database"
-        const dbProduct = DATABASE_PRODUCTS.find(p => p.id === id)
-        
-        if (!dbProduct) {
+        try {
+          const productId = parseInt(id)
+          if (isNaN(productId)) {
+            throw new Error('Invalid product ID')
+          }
+          
+          const response = await productAPI.getById(productId)
+          
+          if (!response.data) {
+            set(s => {
+              const loading = new Set(s.loadingProducts)
+              loading.delete(id)
+              return { loadingProducts: loading }
+            })
+            return null
+          }
+          
+          const backendProduct = response.data as BackendProduct
+          const cachedData = cache.get(id)
+          
+          // If product exists in cache but has invalid stock/category (default values),
+          // update it with new random values to simulate real data
+          let productToUse = cachedData
+          if (cachedData && (cachedData.stock === 0 || cachedData.category === 'General')) {
+            // Product exists but has default values, update it
+            productToUse = {
+              ...cachedData,
+              stock: Math.floor(Math.random() * 91) + 10, // Random between 10-100
+              category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
+            }
+          }
+          
+          const product = convertBackendProduct(backendProduct, productToUse)
+          
+          // Check if we need to evict items
+          const currentState = get()
+          let updatedCache = new Map(currentState.cache)
+          let evictionCount = 0
+          const evictionEvents: CacheEvent[] = []
+          
+          // Calculate current cache size
+          let currentSize = 0
+          updatedCache.forEach(p => currentSize += p.size)
+          
+          // Evict LRU items if needed
+          while (currentSize + product.size > MAX_CACHE_SIZE && updatedCache.size > 0) {
+            // Find LRU item
+            let lruKey = ''
+            let lruTime = Infinity
+            
+            updatedCache.forEach((p, key) => {
+              if ((p.lastAccessed || 0) < lruTime) {
+                lruTime = p.lastAccessed || 0
+                lruKey = key
+              }
+            })
+            
+            if (lruKey) {
+              const evictedProduct = updatedCache.get(lruKey)!
+              evictionEvents.push({
+                id: crypto.randomUUID(),
+                type: 'eviction',
+                productId: lruKey,
+                productName: evictedProduct.name,
+                timestamp: Date.now(),
+              })
+              currentSize -= evictedProduct.size
+              updatedCache.delete(lruKey)
+              evictionCount++
+            }
+          }
+          
+          // Add new product to cache
+          updatedCache.set(id, product)
+          
+          const missEvent: CacheEvent = {
+            id: crypto.randomUUID(),
+            type: 'miss',
+            productId: id,
+            productName: product.name,
+            timestamp: Date.now(),
+          }
+          
+          const newMetrics = {
+            totalRequests: currentState.metrics.totalRequests + 1,
+            cacheHits: currentState.metrics.cacheHits,
+            cacheMisses: currentState.metrics.cacheMisses + 1,
+            evictions: currentState.metrics.evictions + evictionCount,
+            hitRate: currentState.metrics.cacheHits / (currentState.metrics.totalRequests + 1),
+            missRate: (currentState.metrics.cacheMisses + 1) / (currentState.metrics.totalRequests + 1),
+          }
+          
+          const loading = new Set(currentState.loadingProducts)
+          loading.delete(id)
+          
+          set({
+            cache: updatedCache,
+            metrics: newMetrics,
+            events: [missEvent, ...evictionEvents, ...currentState.events].slice(0, 50),
+            loadingProducts: loading,
+          })
+          
+          return product
+        } catch (error) {
+          console.error('Error fetching product:', error)
           set(s => {
             const loading = new Set(s.loadingProducts)
             loading.delete(id)
@@ -121,156 +258,94 @@ export const useCacheStore = create<CacheState>()(
           })
           return null
         }
-        
-        const product: Product = {
-          ...dbProduct,
-          lastAccessed: Date.now(),
-          accessCount: 1,
-          createdAt: Date.now(),
-        }
-        
-        // Check if we need to evict items
-        const currentState = get()
-        let updatedCache = new Map(currentState.cache)
-        let evictionCount = 0
-        const evictionEvents: CacheEvent[] = []
-        
-        // Calculate current cache size
-        let currentSize = 0
-        updatedCache.forEach(p => currentSize += p.size)
-        
-        // Evict LRU items if needed
-        while (currentSize + product.size > MAX_CACHE_SIZE && updatedCache.size > 0) {
-          // Find LRU item
-          let lruKey = ''
-          let lruTime = Infinity
-          
-          updatedCache.forEach((p, key) => {
-            if ((p.lastAccessed || 0) < lruTime) {
-              lruTime = p.lastAccessed || 0
-              lruKey = key
-            }
-          })
-          
-          if (lruKey) {
-            const evictedProduct = updatedCache.get(lruKey)!
-            evictionEvents.push({
-              id: crypto.randomUUID(),
-              type: 'eviction',
-              productId: lruKey,
-              productName: evictedProduct.name,
-              timestamp: Date.now(),
-            })
-            currentSize -= evictedProduct.size
-            updatedCache.delete(lruKey)
-            evictionCount++
-          }
-        }
-        
-        // Add new product to cache
-        updatedCache.set(id, product)
-        
-        const missEvent: CacheEvent = {
-          id: crypto.randomUUID(),
-          type: 'miss',
-          productId: id,
-          productName: product.name,
-          timestamp: Date.now(),
-        }
-        
-        const newMetrics = {
-          totalRequests: currentState.metrics.totalRequests + 1,
-          cacheHits: currentState.metrics.cacheHits,
-          cacheMisses: currentState.metrics.cacheMisses + 1,
-          evictions: currentState.metrics.evictions + evictionCount,
-          hitRate: currentState.metrics.cacheHits / (currentState.metrics.totalRequests + 1),
-          missRate: (currentState.metrics.cacheMisses + 1) / (currentState.metrics.totalRequests + 1),
-        }
-        
-        const loading = new Set(currentState.loadingProducts)
-        loading.delete(id)
-        
-        set({
-          cache: updatedCache,
-          metrics: newMetrics,
-          events: [missEvent, ...evictionEvents, ...currentState.events].slice(0, 50),
-          loadingProducts: loading,
-        })
-        
-        return product
       },
 
       addProduct: async (productData) => {
-        const state = get()
-        const id = `p${Date.now()}`
-        const size = Math.floor(Math.random() * 1024) + 512 // Random size between 512-1536 bytes
-        
-        const product: Product = {
-          ...productData,
-          id,
-          lastAccessed: Date.now(),
-          accessCount: 0,
-          createdAt: Date.now(),
-          size,
-        }
-        
-        // Add to database simulation
-        DATABASE_PRODUCTS.push(product)
-        
-        // Check if we need to evict items
-        let updatedCache = new Map(state.cache)
-        let evictionCount = 0
-        const evictionEvents: CacheEvent[] = []
-        
-        let currentSize = 0
-        updatedCache.forEach(p => currentSize += p.size)
-        
-        while (currentSize + product.size > MAX_CACHE_SIZE && updatedCache.size > 0) {
-          let lruKey = ''
-          let lruTime = Infinity
-          
-          updatedCache.forEach((p, key) => {
-            if ((p.lastAccessed || 0) < lruTime) {
-              lruTime = p.lastAccessed || 0
-              lruKey = key
-            }
+        try {
+          const response = await productAPI.create({
+            name: productData.name,
+            price: productData.price.toString(),
           })
           
-          if (lruKey) {
-            const evictedProduct = updatedCache.get(lruKey)!
-            evictionEvents.push({
-              id: crypto.randomUUID(),
-              type: 'eviction',
-              productId: lruKey,
-              productName: evictedProduct.name,
-              timestamp: Date.now(),
-            })
-            currentSize -= evictedProduct.size
-            updatedCache.delete(lruKey)
-            evictionCount++
+          if (!response.data) {
+            throw new Error('Failed to create product')
           }
+          
+          const backendProduct = response.data as BackendProduct
+          const state = get()
+          const id = backendProduct.id.toString()
+          const size = Math.floor(Math.random() * 1024) + 512 // Random size between 512-1536 bytes
+          
+          const product: Product = {
+            id,
+            name: backendProduct.name,
+            price: parseFloat(backendProduct.price) || productData.price,
+            category: productData.category || 'General',
+            stock: productData.stock || 0,
+            lastAccessed: Date.now(),
+            accessCount: 0,
+            createdAt: Date.now(),
+            size,
+          }
+          
+          // Check if we need to evict items
+          let updatedCache = new Map(state.cache)
+          let evictionCount = 0
+          const evictionEvents: CacheEvent[] = []
+          
+          let currentSize = 0
+          updatedCache.forEach(p => currentSize += p.size)
+          
+          while (currentSize + product.size > MAX_CACHE_SIZE && updatedCache.size > 0) {
+            let lruKey = ''
+            let lruTime = Infinity
+            
+            updatedCache.forEach((p, key) => {
+              if ((p.lastAccessed || 0) < lruTime) {
+                lruTime = p.lastAccessed || 0
+                lruKey = key
+              }
+            })
+            
+            if (lruKey) {
+              const evictedProduct = updatedCache.get(lruKey)!
+              evictionEvents.push({
+                id: crypto.randomUUID(),
+                type: 'eviction',
+                productId: lruKey,
+                productName: evictedProduct.name,
+                timestamp: Date.now(),
+              })
+              currentSize -= evictedProduct.size
+              updatedCache.delete(lruKey)
+              evictionCount++
+            }
+          }
+          
+          updatedCache.set(id, product)
+          
+          const addEvent: CacheEvent = {
+            id: crypto.randomUUID(),
+            type: 'add',
+            productId: id,
+            productName: product.name,
+            timestamp: Date.now(),
+          }
+          
+          set({
+            cache: updatedCache,
+            metrics: {
+              ...state.metrics,
+              evictions: state.metrics.evictions + evictionCount,
+            },
+            events: [addEvent, ...evictionEvents, ...state.events].slice(0, 50),
+          })
+          
+          return product
+        } catch (error) {
+          console.error('Error adding product:', error)
+          throw error
         }
-        
-        updatedCache.set(id, product)
-        
-        const addEvent: CacheEvent = {
-          id: crypto.randomUUID(),
-          type: 'add',
-          productId: id,
-          productName: product.name,
-          timestamp: Date.now(),
-        }
-        
-        set({
-          cache: updatedCache,
-          metrics: {
-            ...state.metrics,
-            evictions: state.metrics.evictions + evictionCount,
-          },
-          events: [addEvent, ...evictionEvents, ...state.events].slice(0, 50),
-        })
-        
-        return product
       },
 
       updateProduct: async (id, updates) => {
@@ -282,28 +357,60 @@ export const useCacheStore = create<CacheState>()(
         }
         
         const product = cache.get(id)!
-        const updatedProduct = {
-          ...product,
-          ...updates,
-          lastAccessed: Date.now(),
+        
+        try {
+          const productId = parseInt(id)
+          if (isNaN(productId)) {
+            throw new Error('Invalid product ID')
+          }
+          
+          const response = await productAPI.update({
+            id: productId,
+            name: updates.name || product.name,
+            price: (updates.price || product.price).toString(),
+          })
+          
+          if (!response.data) {
+            throw new Error('Failed to update product')
+          }
+          
+          const backendProduct = response.data as BackendProduct
+          const updatedProduct = {
+            ...product,
+            name: backendProduct.name,
+            price: parseFloat(backendProduct.price) || product.price,
+            ...updates,
+            lastAccessed: Date.now(),
+          }
+          
+          cache.set(id, updatedProduct)
+          
+          const updateEvent: CacheEvent = {
+            id: crypto.randomUUID(),
+            type: 'update',
+            productId: id,
+            productName: updatedProduct.name,
+            timestamp: Date.now(),
+          }
+          
+          set({
+            cache,
+            events: [updateEvent, ...state.events].slice(0, 50),
+          })
+          
+          return updatedProduct
+        } catch (error) {
+          console.error('Error updating product:', error)
+          // Still update locally even if API fails
+          const updatedProduct = {
+            ...product,
+            ...updates,
+            lastAccessed: Date.now(),
+          }
+          cache.set(id, updatedProduct)
+          set({ cache })
+          return updatedProduct
         }
-        
-        cache.set(id, updatedProduct)
-        
-        const updateEvent: CacheEvent = {
-          id: crypto.randomUUID(),
-          type: 'update',
-          productId: id,
-          productName: updatedProduct.name,
-          timestamp: Date.now(),
-        }
-        
-        set({
-          cache,
-          events: [updateEvent, ...state.events].slice(0, 50),
-        })
-        
-        return updatedProduct
       },
 
       deleteProduct: (id) => {
@@ -329,11 +436,26 @@ export const useCacheStore = create<CacheState>()(
         }
       },
 
-      clearCache: () => {
+      clearCache: async () => {
+        const currentState = get()
+        // Clear cache, events, AND reset metrics
+        // This makes sense because if cache is empty, metrics should be reset too
         set({
+          ...currentState,
           cache: new Map(),
           events: [],
+          metrics: {
+            totalRequests: 0,
+            cacheHits: 0,
+            cacheMisses: 0,
+            evictions: 0,
+            hitRate: 0,
+            missRate: 0,
+          },
         })
+        // Reload available products from backend after clearing cache
+        // This ensures "Fetch from Backend" section shows products
+        await loadAllProducts()
       },
 
       resetMetrics: () => {
@@ -393,6 +515,66 @@ export const useCacheStore = create<CacheState>()(
 )
 
 // Export available database products for UI
-export const getAvailableProducts = () => DATABASE_PRODUCTS.map(p => ({ id: p.id, name: p.name }))
+// This will be populated from the backend when getAllProducts is called
+let availableProductsCache: Array<{ id: string; name: string }> = []
+
+export const getAvailableProducts = () => availableProductsCache
 export const MAX_MEMORY = MAX_CACHE_SIZE
+
+// Function to load all products from backend
+// This uses the backend's cache-aside strategy - if cache is empty, it fetches from DB
+export const loadAllProducts = async () => {
+  try {
+    console.log('Loading products from backend...')
+    const response = await productAPI.getAll()
+    console.log('Backend response:', response)
+    
+    // Backend returns { code: 200, message: "success", data: [...] }
+    if (response && response.code === 200) {
+      // Handle both direct array and nested data structure
+      let backendProducts: BackendProduct[] = []
+      
+      if (Array.isArray(response.data)) {
+        backendProducts = response.data as BackendProduct[]
+      } else if (response.data && typeof response.data === 'object') {
+        // Sometimes data might be wrapped
+        const data = response.data as any
+        if (Array.isArray(data)) {
+          backendProducts = data
+        }
+      }
+      
+      console.log(`Loaded ${backendProducts.length} products from backend`)
+      
+      availableProductsCache = backendProducts.map((p) => ({
+        id: p.id.toString(),
+        name: p.name,
+      }))
+      
+      // Dispatch a custom event to notify components that availableProductsCache has changed
+      // This allows ProductTable to update and show "Fetch from Backend" section
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('availableProductsUpdated'))
+      }
+      
+      // DO NOT automatically populate local cache
+      // This allows "Fetch from Backend" section to show products
+      // Products will be loaded into cache only when explicitly fetched via getProduct()
+      // This demonstrates Cache-Aside pattern: load on demand, not pre-load
+      
+      // If no products, log it
+      if (backendProducts.length === 0) {
+        console.log('No products found in database. Create some products using the "Add Product" button.')
+      }
+      
+      return backendProducts.length
+    } else {
+      console.warn('Invalid response from backend:', response)
+      return 0
+    }
+  } catch (error) {
+    console.error('Error loading products from backend:', error)
+    return 0
+  }
+}
 

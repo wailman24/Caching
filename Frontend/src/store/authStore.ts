@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { User } from '@/types'
+import { authAPI, apiClient } from '@/lib/api'
 
 interface ProfileUpdateData {
   name?: string
@@ -15,114 +16,122 @@ interface ProfileUpdateData {
 interface AuthState {
   user: User | null
   isAuthenticated: boolean
+  token: string | null
   login: (email: string, password: string) => Promise<boolean>
-  signup: (name: string, email: string, password: string) => Promise<boolean>
+  signup: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => void
   updateProfile: (data: ProfileUpdateData) => Promise<boolean>
   updateAvatar: (avatarUrl: string) => void
 }
-
-// Simulated user storage
-const USERS: Map<string, { user: User; password: string }> = new Map()
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
       isAuthenticated: false,
+      token: null,
 
       login: async (email: string, password: string) => {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        const stored = USERS.get(email)
-        
-        if (stored && stored.password === password) {
-          const updatedUser = {
-            ...stored.user,
-            lastActive: Date.now(),
+        try {
+          const response = await authAPI.login(email, password)
+          
+          if (response.code === 200 && response.data && response.token) {
+            const userData = response.data as { id: number; email: string; name?: string }
+            const user: User = {
+              id: userData.id.toString(),
+              email: userData.email,
+              name: userData.name || userData.email.split('@')[0], // Fallback to email username if name not provided
+              joinedAt: Date.now(),
+              lastActive: Date.now(),
+            }
+            
+            // Set token in API client
+            apiClient.setToken(response.token)
+            
+            set({
+              user,
+              isAuthenticated: true,
+              token: response.token,
+            })
+            return true
           }
-          set({
-            user: updatedUser,
-            isAuthenticated: true,
-          })
-          return true
+          
+          return false
+        } catch (error) {
+          console.error('Login error:', error)
+          return false
         }
-        
-        // Demo account
-        if (email === 'demo@cache.io' && password === 'demo123') {
-          const demoUser: User = {
-            id: 'demo-user',
-            email: 'demo@cache.io',
-            name: 'Demo User',
-            bio: 'Cache enthusiast and system performance specialist. Love optimizing applications for speed and efficiency.',
-            location: 'San Francisco, CA',
-            company: 'Cache Systems Inc.',
-            website: 'https://cache.io',
-            phone: '+1 (555) 123-4567',
-            joinedAt: Date.now() - 30 * 24 * 60 * 60 * 1000, // 30 days ago
-            lastActive: Date.now(),
-          }
-          set({
-            user: demoUser,
-            isAuthenticated: true,
-          })
-          return true
-        }
-        
-        return false
       },
 
       signup: async (name: string, email: string, password: string) => {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        if (USERS.has(email)) {
-          return false
+        try {
+          const response = await authAPI.signup(name, email, password)
+          
+          if (response.code === 200 && response.data) {
+            const userData = response.data as { id: number; email: string; name: string }
+            const user: User = {
+              id: userData.id.toString(),
+              email: userData.email,
+              name: userData.name,
+              joinedAt: Date.now(),
+              lastActive: Date.now(),
+            }
+            
+            // If token is provided, set it
+            if (response.token) {
+              apiClient.setToken(response.token)
+              set({
+                user,
+                isAuthenticated: true,
+                token: response.token,
+              })
+            } else {
+              set({
+                user,
+                isAuthenticated: false,
+                token: null,
+              })
+            }
+            
+            return { success: true }
+          }
+          
+          // Return error message from backend (could be 409 Conflict or other error)
+          const errorMessage = typeof response.message === 'string' 
+            ? response.message 
+            : 'Failed to create account'
+          return { success: false, error: errorMessage }
+        } catch (error: any) {
+          console.error('Signup error:', error)
+          // Try to extract error message from response
+          let errorMessage = 'An error occurred. Please try again later.'
+          if (error?.response?.message) {
+            errorMessage = error.response.message
+          } else if (error?.message) {
+            errorMessage = error.message
+          }
+          return { success: false, error: errorMessage }
         }
-        
-        const user: User = {
-          id: crypto.randomUUID(),
-          email,
-          name,
-          joinedAt: Date.now(),
-          lastActive: Date.now(),
-        }
-        
-        USERS.set(email, { user, password })
-        
-        set({
-          user,
-          isAuthenticated: true,
-        })
-        
-        return true
       },
 
       logout: () => {
+        apiClient.setToken(null)
         set({
           user: null,
           isAuthenticated: false,
+          token: null,
         })
       },
 
       updateProfile: async (data: ProfileUpdateData) => {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 300))
-        
         const currentUser = get().user
         if (!currentUser) return false
         
+        // For now, just update locally since backend doesn't have profile update endpoint
         const updatedUser: User = {
           ...currentUser,
           ...data,
           lastActive: Date.now(),
-        }
-        
-        // Update in simulated storage
-        const stored = USERS.get(currentUser.email)
-        if (stored) {
-          USERS.set(currentUser.email, { ...stored, user: updatedUser })
         }
         
         set({ user: updatedUser })
@@ -147,7 +156,14 @@ export const useAuthStore = create<AuthState>()(
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated,
+        token: state.token,
       }),
+      onRehydrateStorage: () => (state) => {
+        // Restore token to API client when store is rehydrated
+        if (state?.token) {
+          apiClient.setToken(state.token)
+        }
+      },
     }
   )
 )

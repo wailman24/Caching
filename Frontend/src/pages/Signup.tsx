@@ -39,20 +39,21 @@ export default function Signup() {
   const onSubmit = async (data: SignupFormData) => {
     setIsLoading(true)
     try {
-      const success = await signup(data.name, data.email, data.password)
-      if (success) {
+      const result = await signup(data.name, data.email, data.password)
+      if (result.success) {
         toast.success('Account created!', {
           description: 'Welcome to Cache Simulator',
         })
         navigate('/dashboard')
       } else {
         toast.error('Signup failed', {
-          description: 'An account with this email already exists',
+          description: result.error || 'An account with this email already exists',
         })
       }
-    } catch {
-      toast.error('An error occurred', {
-        description: 'Please try again later',
+    } catch (error: any) {
+      const errorMessage = error?.message || 'An error occurred. Please try again later.'
+      toast.error('Signup failed', {
+        description: errorMessage,
       })
     } finally {
       setIsLoading(false)

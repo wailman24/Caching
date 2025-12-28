@@ -1,4 +1,5 @@
-import { useCacheStore, MAX_MEMORY } from '@/store/cacheStore'
+import { useEffect } from 'react'
+import { useCacheStore, MAX_MEMORY, loadAllProducts } from '@/store/cacheStore'
 import { MetricsCard } from '@/components/dashboard/MetricsCard'
 import { MemoryGauge } from '@/components/dashboard/MemoryGauge'
 import { EventLog } from '@/components/dashboard/EventLog'
@@ -8,9 +9,28 @@ import { Zap, AlertCircle, Trash2, Activity, RefreshCw, Server } from 'lucide-re
 import { Button } from '@/components/ui/button'
 
 export default function Dashboard() {
-  const { metrics, events, getCacheSize, getCachedProducts, clearCache, resetMetrics } = useCacheStore()
+  // Use Zustand selectors to ensure real-time updates
+  const metrics = useCacheStore((state) => state.metrics)
+  const events = useCacheStore((state) => state.events)
+  const cache = useCacheStore((state) => state.cache)
+  const getCacheSize = useCacheStore((state) => state.getCacheSize)
+  const clearCache = useCacheStore((state) => state.clearCache)
+  const resetMetrics = useCacheStore((state) => state.resetMetrics)
+  
   const cacheSize = getCacheSize()
-  const products = getCachedProducts()
+  const products = Array.from(cache.values())
+
+  useEffect(() => {
+    // Load all products from backend on mount
+    // This populates availableProductsCache but does NOT add them to cache
+    // Products will be loaded into cache only when explicitly fetched (Cache-Aside pattern)
+    console.log('Dashboard mounted, loading products from backend...')
+    loadAllProducts().then((count) => {
+      console.log(`Loaded ${count} products from backend (available for fetching)`)
+    }).catch((error) => {
+      console.error('Failed to load products:', error)
+    })
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -27,7 +47,7 @@ export default function Dashboard() {
             <RefreshCw className="w-4 h-4 mr-2" />
             Reset Metrics
           </Button>
-          <Button variant="destructive" size="sm" onClick={clearCache}>
+          <Button variant="destructive" size="sm" onClick={() => clearCache()}>
             <Trash2 className="w-4 h-4 mr-2" />
             Clear Cache
           </Button>
@@ -88,11 +108,14 @@ export default function Dashboard() {
             <Server className="w-6 h-6 text-green-500" />
           </div>
           <div>
-            <h3 className="font-semibold text-green-400">Cache-Aside Strategy Active</h3>
+            <h3 className="font-semibold text-green-400">Backend Cache Strategies Active</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              When data is requested, the system first checks the cache. On a <span className="text-green-500 font-medium">hit</span>, 
-              data is returned instantly. On a <span className="text-orange-500 font-medium">miss</span>, the system fetches from the 
-              database (1s delay), stores it in cache, then returns it. LRU eviction policy removes oldest items when memory is full.
+              <strong>Cache-Aside (Reads):</strong> Backend checks Redis cache first. On a <span className="text-green-500 font-medium">hit</span>, 
+              data returns instantly. On a <span className="text-orange-500 font-medium">miss</span>, backend fetches from MySQL database, 
+              stores in Redis cache, then returns it.
+              <br />
+              <strong>Write-Through (Writes):</strong> Create/Update operations write to MySQL database first, then immediately update Redis cache. 
+              Updates use Redis locks to prevent race conditions.
             </p>
           </div>
         </div>

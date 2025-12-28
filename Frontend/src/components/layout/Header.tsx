@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useCacheStore } from '@/store/cacheStore'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,6 +70,7 @@ export function Header() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="relative h-10 w-10 rounded-full">
               <Avatar className="h-10 w-10 border-2 border-primary/20">
+                <AvatarImage src={user?.avatar} alt={user?.name || user?.email || 'User'} />
                 <AvatarFallback className="bg-primary/10 text-primary font-medium">
                   {user?.name ? getInitials(user.name) : 'U'}
                 </AvatarFallback>

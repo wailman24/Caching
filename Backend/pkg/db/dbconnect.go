@@ -12,10 +12,9 @@ import (
 var Db *gorm.DB
 
 func Connect() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("error loading .env file")
-	}
+	// Try to load .env file, but don't fail if it doesn't exist
+	// (variables might be set via environment or docker-compose)
+	_ = godotenv.Load()
 
 	user := os.Getenv("MYSQL_USER")
 	dbname := os.Getenv("MYSQL_DATABASE")

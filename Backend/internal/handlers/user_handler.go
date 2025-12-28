@@ -61,6 +61,11 @@ func (uh *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	err = uh.serv.CreateUser(ctx, &user)
 	if err != nil {
+		// Check if it's an email already exists error
+		if err.Error() == "email already exists" {
+			utils.JSON(w, http.StatusConflict, "email already exists", nil)
+			return
+		}
 		utils.Error(w, http.StatusInternalServerError, err)
 		return
 	}
