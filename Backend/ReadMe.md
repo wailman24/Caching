@@ -1,8 +1,42 @@
+## Backend Documentation
+
+## Running the Backend
+
+To run the backend services, you can use **Docker Compose**. Make sure you have Docker and Docker Compose installed.
+
+### Steps
+
+1. **Open a terminal** and navigate to the backend folder (where `docker-compose.yml` is located):
+
+```bash
+cd Backend
+```
+
+2. **Build and start the containers** in detached mode:
+
+```bash
+docker-compose up -d --build
+```
+
+# Explanation
+
+- `up` → Starts the services defined in `docker-compose.yml`.
+- `-d` → Detached mode, runs containers in the background.
+- `--build` → Rebuilds Docker images before starting, ensuring your latest code is included.
+
+## Optional Commands
+
+**View logs of a service:**
+
+```bash
+docker-compose logs -f api
+```
+
+---
+
 ## Caching Strategies and Redis Lock Implementation in Product Repository
 
 The `ProductRepositorie` in this project demonstrates **multiple caching strategies** and the use of **Redis locks** to ensure consistency in a high-concurrency environment.
-
----
 
 ### 1. Write-Through Strategy (Create & Update)
 
