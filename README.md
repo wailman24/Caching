@@ -1,10 +1,10 @@
-## What is caching ?
+
+## What is caching ? 
 
 In order to shorten the time it takes to access **frequently accessed data** in the future, **caching** is a technique used to store that data in a **fast storage layer**. Due to **network latency, I/O operations, or computational complexity**, direct data retrieval from databases or external services can be slow in contemporary applications. Applications can react to **repeated requests** faster by keeping a **copy of this data** in a cache.
 
 A good metaphor for **caching** would be to imagine a **notepad** where you keep key details rather than **digging through the archives** every time you need them. This way you spend **less time searching** for the information.
 
----
 
 ## Types of Caches
 
@@ -14,7 +14,7 @@ Here are a few examples of caching types:
 
 ### 1. In-Memory Cache
 
-Data is directly **stored in the RAM** of a server or application process by in-memory caches. This enables **extremely fast** access times, which are frequently expressed in microseconds. RAM data is volatile and will be lost if the process restarts. For data that is frequently read but
+Data is directly **stored in the RAM** of a server or application process by in-memory caches. This enables **extremely fast** access times, which are frequently expressed in microseconds. RAM data is volatile and will be lost if the process restarts. For data that is frequently read but 
 **does not** need **long-term persistence**, in-memory caches work best.
 
 **Use Cases:** Session storage, configuration settings, computed results, frequently accessed product data.
@@ -31,7 +31,6 @@ Data is stored on the user's device, such as in a mobile application or browser,
 
 **Use Cases:** Storing API responses, static assets, user preferences.
 
----
 
 ## Benefits of Caching
 
@@ -42,7 +41,6 @@ Caching is not just about speed. It also improves system efficiency, reduces cos
 - **Cost Savings:** Reduced computation and I/O lowers infrastructure costs.
 - **Enhanced User Experience:** Users get faster responses and smoother interactions.
 
----
 
 ## In-Memory Caching in Depth
 
@@ -61,19 +59,26 @@ However, because memory is limited, careful management is necessary to ensure ef
 3. **Consistency:**  
    Cached data can become outdated if the original data changes. Strategies such as cache invalidation, TTL (Time to Live), or write-through/write-behind policies help maintain consistency between the cache and the underlying database.
 
----
 
-## Caching Strategies Explained
+## Elements of a In memory Cache
 
-### Cache-Aside (Lazy Loading)
+To build an in-memory caching system you'll have to decide on multiple factors and moving parts.
 
-In the cache-aside pattern, the application is responsible for reading and writing from/to the cache. When a request arrives:
+When choosing these elements you'll have to take in consideration the following:
+- Resource limits: Since caching is in RAM, designing a system that relies on it also calls for taking in consideration its limits.
+- Consistency: Some techniques in caching require desynchronizing the database and persistant data storage from the cache, this risks losing some data if unforeseen events happen.
 
-1. Check the cache.
-2. If present (cache hit), return the data.
-3. If absent (cache miss), fetch from the database, store it in the cache, then return it.
 
-This approach keeps cache and database loosely coupled, but the application must handle cache population and invalidation.
+### Loading Strategies
+
+The first element of building a cache is deciding how to load data that <u>already</u> exists into the cache.
+
+#### Cache Aside
+This is the most common loading strategy it simply states:
+- If the data is requested and not in the cache
+- Then load that data in the cache
+
+This loading strategy is fine for most applications as it doesn't populate the cache with unused data.
 
 ```mermaid
 flowchart TD;
@@ -84,22 +89,49 @@ D --> E[Store Data in Cache]
 E --> F[Return Data to Application]
 ```
 
-### Read-Through
+#### Refresh Ahead
 
-The cache acts as a mediator between the application and the database. On a cache miss, it automatically loads data from the database, stores it in the cache, and returns it. This centralizes cache management, reducing application complexity.
+This is a more complicated loading strategy, it solves the following problematic with popular TTL (time to live) based caches.
+
+Problematic:
+- Popular data points dont get exempt from the TTL invalidation policy and will result in a cache every time TTL reaches 0.
+
+Solution:
+- Create a system that refreshes popular data point
+
+So how refresh ahead creates this system is as follows:
+- set a certain `refresh-ahead-factor` to a number between 0 and 1
+- everytime a data point is accessed check:
+$$
+TTL_t < TTL_0 \ \cdot \ refresh\_ahead\_factor
+$$
+- If this is true then immediately fetch the data and reset the TTL of that data point
 
 ```mermaid
 flowchart TD
-    A[Application Request] --> B[Cache]
-    B -- Hit --> C[Return Data to Application]
-    B -- Miss --> D[Cache Fetches Data from Database]
-    D --> B[Store Data in Cache]
-    B --> C[Return Data to Application]
+
+    A[Application] -->|Request| B{Check Cache}
+
+    B -->|Cache Hit| C(Return Data)
+
+    C -->D{Refresh Ahead Check}
+
+    D -->|Yes| E(Refresh Data & TTL)
+
+    D -->|No| F(Do Nothing)
+
+    B -->|Cache Miss| G(Fetch Data as normal)
 ```
 
-### Write-Through
 
-With write-through caching, all writes go to both the cache and the database synchronously. This guarantees strong consistency because the cache and database always reflect the same data. The trade-off is slightly slower write operations.
+### Writing Strategies
+
+Writing strategies define what you do when a certain data point is added, updated, or deleted from the database.
+#### Write-through
+
+This writing system updates both the cache and the database synchronously.
+
+This writing system ensured strong consistency between the database and the cache, but makes writes more expensive as they have to do 2 operations.
 
 ```mermaid
 flowchart TD
@@ -108,174 +140,153 @@ flowchart TD
     C --> D[Confirmation to Application]
 ```
 
-### Write-Behind (Write-Back)
+#### Write-Aside
 
-Write-behind caching allows applications to write data to the cache first and asynchronously update the database later. This improves write performance but introduces potential data loss if the cache fails before writing to the database. Proper monitoring and retry mechanisms are essential.
+this writing strategy only writes to the database and ignored the cache, the benefit of this strategy is that the cache is not populated by non-accessed data, but fails when read after writes are very common since an immediate cache miss will happen.
 
 ```mermaid
+flowchart TD
+    A[Application Write Request] --> C[Write to Database]
+    C --> D[Confirmation to Application]
+```
+
+
+#### Write-behind
+
+This writing strategy only writes to the cache and queues up the database writes asynchronously to be processed during times on lesser load.
+
+This strategy thrives in high availability contexts where a lot of data is accessed after its written but introduces complexity in the form of asynchronous database writes and the possibility of data loss if the application crashes before a batch is processed.
+
+ ```mermaid
 flowchart TD
     A[Application Write Request] --> B[Write to Cache]
     B --> C[Return Confirmation to Application]
     B --> D[Asynchronously Write to Database]
 ```
 
----
+### Eviction Policies
 
-## Eviction Policies
+In most systems the cache will have an upper limit on how many keys it can store, this then calls for a system to liberate space when it gets full.
+#### LRU (Least Recently Used)
 
-When the cache reaches its maximum capacity, it cannot store new data without removing some existing entries. **Eviction policies** define which items get removed to make space. Choosing the right policy ensures that the cache continues to provide fast access to the most useful data.
+In this system, the key that hasn't been accessed for the longest time gets evicted from the cache.
 
-### 1. Least Recently Used (LRU)
+This assumes that data that's being reused will be reused again 
 
-- **Description:** Removes the item that has not been accessed for the longest time.
-- **Assumption:** Data used recently will likely be used again soon.
-- **Example:** In a cache of 3 items `[A, B, C]`, if `A` was used long ago, it will be evicted first when adding a new item `D`.
+#### LFU (Least Frequently Used)
 
-### 2. Least Frequently Used (LFU)
+In this system, the key that has been accessed the least will be evicted first
 
-- **Description:** Removes the item that is accessed the fewest times.
-- **Assumption:** Data that is rarely accessed is less valuable.
-- **Example:** If item `B` has been accessed only once while `A` and `C` were accessed 5 times, `B` will be evicted first when the cache is full.
+This assumes that data that isn't being accessed frequently is less valuable.
 
-### 3. First In, First Out (FIFO)
+#### FIFO (First in, first out)
 
-- **Description:** Removes the oldest item in the cache.
-- **Assumption:** Older data is less relevant than newer data.
-- **Example:** In `[A, B, C]`, `A` was added first, so `A` is removed when adding `D`.
+In this system, the cache will keep track of when keys where added and removes the oldest key first.
 
-### 4. Random Eviction
+This is good when your system is linear, i.e. when data is most used right after its accessed the first time.
 
-- **Description:** Removes a random cache entry.
-- **Notes:** Simple but sometimes effective if access patterns are unpredictable.
+#### Random Eviction
 
----
+The simplest eviction policy, pick a key and remove it.
 
-## Metrics and Monitoring
+This is good if there is no particular pattern to data access and the most important aspect is just getting new space.
 
-To know if a cache is working well, we need to track some important numbers. Here’s what they mean and how to measure them:
+### Invalidation Strategies
 
-- **Cache Hit Rate:**
+Cache invalidation, is when data is updated in persistant storage but it is stale in the cache.
 
-  - **What it is:** Percentage of requests answered directly from the cache. Higher is better.
-  - **How to measure:** Count the number of cache hits ÷ total requests × 100.
-    ```text
-    Cache Hit Rate = (Cache Hits / Total Requests) * 100%
-    ```
+We use multiple ways to make sure our cache is up to date with the persistant storage (database).
 
-- **Cache Miss Rate:**
+#### Manual
 
-  - **What it is:** Percentage of requests that are not in the cache and must be fetched from the database. Lower is better.
-  - **How to measure:** Count the number of cache misses ÷ total requests × 100.
-    ```text
-    Cache Miss Rate = (Cache Misses / Total Requests) * 100%
-    ```
+The simplest invalidation technique, when the application updates the storage it goes and updates the cache entry.
 
-- **Eviction Rate:**
+This does also mean that writes are now heavier since they also update the cache.
+#### TTL Based
 
-  - **What it is:** How often items are removed from the cache to make space.
-  - **How to measure:** Count the number of evicted items over a period of time.
-    ```text
-    Eviction Rate = (Number of Evictions / Time Period)
-    ```
+The most common strategy, allowing stale data but only for a certain period of time until it gets invalidated.
 
-- **Data Freshness:**
-  - **What it is:** How up-to-date the cached data is, so users don’t see old information.
-  - **How to measure:** Track the age of items in the cache (current time − last updated time).
-    ```text
-    Data Age = Current Time - Last Updated Time
-    ```
+It works by setting a time to live (TTL) to any data that enters the cache, and when that time is over it is automatically invalidated and deleted from the cache.
 
-> Most caching systems like Redis, Memcached, or in-memory libraries provide built-in stats or commands to get these metrics easily.
+#### Write-event Based
 
----
+This strategy invalidates the current data after every write in the database.
 
-## Redis Locks (Distributed Locks)
+This makes the database and the cache coupled but also maintains strong consistency.
 
-When multiple processes or servers access and update the **same cached data** concurrently, there is a risk of **race conditions**, **cache stampedes**, or inconsistent data. **Redis locks** help prevent these issues by providing a **mechanism to coordinate access** to shared resources in a distributed environment.
+## Guidelines on setting up your cache
 
-### What is a Redis Lock?
+Each system requires a different configuration to get the most out of the cache, but there is a few general guidelines to point you in the correct direction.
 
-A Redis lock is a **temporary marker in Redis** that indicates a resource is currently being used or updated. Only the process that holds the lock can modify the resource, ensuring **mutual exclusion**. Other processes must wait until the lock is released.
+### Consistency
 
-**Example Use Case:**
+You need to decide if your system requires a strong consistency between the cache and the database and if stale data in either one is acceptable.
 
-Imagine a popular product page is frequently accessed, and the cache expires at the same time. Without a lock:
+If the answer is yes then strategies such as write-behind and TTL Based invalidation are usually the best.
+### Read-heavy / Write-heavy
 
-1. Multiple requests hit the database simultaneously (cache miss).
-2. Database overload occurs.
-3. Users experience slower responses.
+A common mistake for caches is thinking of the entire system as 1 data type, while it might be true for some small systems, most of us have multiple data types each with its own access pattern.
 
-With a Redis lock:
+Example:
+In a document writing platform like google docs we might have:
+- Actual document text: High-write
+- Document metadata: High-read
 
-1. The first request acquires the lock and updates the cache.
-2. Other requests wait until the lock is released.
-3. Once the cache is updated, all requests are served from cache, preventing a stampede.
+In this case it is wise to cache the document metadata as write-heavy workloads aren't fit for caching.
 
-### How Redis Locks Work
+### When not to cache
 
-1. **Acquire Lock:**  
-   The process tries to set a key in Redis (e.g., `SETNX product:123:lock 1`).
+There are many cases where a cache is rather unnecessary.
+These include:
+- High-write workloads: if your system receives more writes than reads, they can not be cached as the data will get invalidated too quickly
+- Smaller systems: if your system is small and not complex, it should not include caching as that's another layer of complexity to manage in the code.
+- Low reuse: if the data is accessed only a few times for its lifetime then adding a cache is not needed as most of the data will be evicted or invalidated and not used.
 
-   - **SETNX** (Set if Not eXists) ensures only one process can acquire the lock.
 
-2. **Perform Operation:**  
-   The process safely reads/writes data (e.g., fetches from DB, updates cache).
+## Metrics of performance
 
-3. **Release Lock:**  
-   After completing the operation, the lock is removed (`DEL product:123:lock`), allowing other processes to acquire it.
+To monitor if a cache is working correctly, we can mesure multiple metrics:
 
-### Key Considerations
+### Cache Hit rate
 
-- **Expiration:** Always set a lock expiration time to avoid deadlocks if a process crashes while holding the lock.  
-  Example: `SET product:123:lock 1 NX PX 5000` (lock expires in 5 seconds)
-- **Retry Mechanism:** Other processes can retry acquiring the lock after a short delay.
-- **Distributed Systems:** Redis locks work well for multiple servers or instances accessing the same cache.
+This shows the general effectiveness of a cache, it represents how many of the requests where fetched from cache.
+$$
+Cache\ Hit\ Rate = (Cache\ hits \ / \ Total \ Requests ) \ \cdot 100
+$$
 
-### Summary
+### Cache Miss rate
 
-Redis locks are a simple yet powerful way to:
+This metric shows how often data that isn't in the cache gets requests and thus take longer due to the database.
+$$
+Cache\ Miss\ Rate = (Cache\ Miss \ / \ Total \ Requests ) \ \cdot 100
+$$
 
-- Prevent **race conditions** in caching.
-- Avoid **cache stampedes** on high-traffic resources.
-- Ensure **data consistency** across distributed systems.
+### Eviction rate
 
-> Think of it as **reserving the notepad** while one person writes on it so others don’t overwrite the data simultaneously.
+Shows how often items are evicted, if it is high then the cache is probably overwhelmed and must be expanded.
 
----
+$$
+Eviction\ Rate = Number\ of\ evictions \ / \ Time \ Period 
+$$
 
-## Example Scenarios of In-Memory Caching
+### Data freshness
 
-### 1. E-Commerce Website
+Shows how lagged behind the cache is from the database, this is usually high in systems that don't have time to update the cache.
 
-In an online store, certain products are extremely popular and frequently viewed by users. Fetching product details, prices, and availability from the database every time a user visits the page can slow down the website and put heavy load on the server. By using in-memory caching, these frequently requested items can be stored in RAM, allowing the website to serve them almost instantly.  
-**Benefits:**
+$$
+Data \ Age = \ Current\ Time - \ Last \ Update \ Time
+$$
 
-- Faster page loads for users browsing popular products.
-- Reduced database queries, improving scalability.
-- Ability to handle traffic spikes during promotions or sales.
 
----
+## Cache Locks
 
-### 2. Mobile Application
+Many times, especially in distributed systems you'd have multiple processes / servers all trying to read / write to the same data point.
 
-Mobile apps often rely on APIs to fetch user-specific data, like profile information, preferences, or notifications. Every network request consumes bandwidth and may introduce latency. By caching user session data and recently fetched API responses locally on the device or in a memory layer, the app can respond immediately to repeated requests without contacting the server every time.  
-**Benefits:**
+To avoid race conditions we implement **cache locks** which -- as the name suggests, locks a certain key from being modified until the current process is done with it.
 
-- Improved app responsiveness and smoother user experience.
-- Reduced network calls, saving data usage and battery.
-- Ability to work offline or in low-connectivity scenarios with cached data.
+When the process is done with the key it releases the lock and marks it available for another write / read.
 
----
+This is especially useful in distributed systems where multiple servers might access the same data point.
 
-### 3. Analytics Platform
 
-Dashboards in analytics platforms often display complex computations, such as aggregated metrics, charts, and reports. Calculating these metrics on-the-fly for every user request can be slow and resource-intensive. By caching computed results in memory, the platform can instantly serve dashboards to users while still updating cached values periodically as new data arrives.  
-**Benefits:**
-
-- Real-time or near real-time dashboard updates.
-- Reduced computation on backend servers.
-- Consistent performance for multiple users accessing the same reports simultaneously.
-
----
-[Backend Documentation](Backend/ReadMe.md)
 
