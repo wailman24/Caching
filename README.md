@@ -1,4 +1,4 @@
-## What is caching ? 
+## What is caching ?
 
 In order to shorten the time it takes to access **frequently accessed data** in the future, **caching** is a technique used to store that data in a **fast storage layer**. Due to **network latency, I/O operations, or computational complexity**, direct data retrieval from databases or external services can be slow in contemporary applications. Applications can react to **repeated requests** faster by keeping a **copy of this data** in a cache.
 
@@ -7,13 +7,14 @@ A good metaphor for **caching** would be to imagine a **notepad** where you keep
 ---
 
 ## Types of Caches
+
 The idea is straightforward, but how it is put into practice depends on who needs **access to the data** and where it is **kept**.
 
 Here are a few examples of caching types:
 
 ### 1. In-Memory Cache
 
-Data is directly **stored in the RAM** of a server or application process by in-memory caches. This enables **extremely fast** access times, which are frequently expressed in microseconds. RAM data is volatile and will be lost if the process restarts. For data that is frequently read but 
+Data is directly **stored in the RAM** of a server or application process by in-memory caches. This enables **extremely fast** access times, which are frequently expressed in microseconds. RAM data is volatile and will be lost if the process restarts. For data that is frequently read but
 **does not** need **long-term persistence**, in-memory caches work best.
 
 **Use Cases:** Session storage, configuration settings, computed results, frequently accessed product data.
@@ -188,6 +189,60 @@ To know if a cache is working well, we need to track some important numbers. Her
 
 ---
 
+## Redis Locks (Distributed Locks)
+
+When multiple processes or servers access and update the **same cached data** concurrently, there is a risk of **race conditions**, **cache stampedes**, or inconsistent data. **Redis locks** help prevent these issues by providing a **mechanism to coordinate access** to shared resources in a distributed environment.
+
+### What is a Redis Lock?
+
+A Redis lock is a **temporary marker in Redis** that indicates a resource is currently being used or updated. Only the process that holds the lock can modify the resource, ensuring **mutual exclusion**. Other processes must wait until the lock is released.
+
+**Example Use Case:**
+
+Imagine a popular product page is frequently accessed, and the cache expires at the same time. Without a lock:
+
+1. Multiple requests hit the database simultaneously (cache miss).
+2. Database overload occurs.
+3. Users experience slower responses.
+
+With a Redis lock:
+
+1. The first request acquires the lock and updates the cache.
+2. Other requests wait until the lock is released.
+3. Once the cache is updated, all requests are served from cache, preventing a stampede.
+
+### How Redis Locks Work
+
+1. **Acquire Lock:**  
+   The process tries to set a key in Redis (e.g., `SETNX product:123:lock 1`).
+
+   - **SETNX** (Set if Not eXists) ensures only one process can acquire the lock.
+
+2. **Perform Operation:**  
+   The process safely reads/writes data (e.g., fetches from DB, updates cache).
+
+3. **Release Lock:**  
+   After completing the operation, the lock is removed (`DEL product:123:lock`), allowing other processes to acquire it.
+
+### Key Considerations
+
+- **Expiration:** Always set a lock expiration time to avoid deadlocks if a process crashes while holding the lock.  
+  Example: `SET product:123:lock 1 NX PX 5000` (lock expires in 5 seconds)
+- **Retry Mechanism:** Other processes can retry acquiring the lock after a short delay.
+- **Distributed Systems:** Redis locks work well for multiple servers or instances accessing the same cache.
+
+### Summary
+
+Redis locks are a simple yet powerful way to:
+
+- Prevent **race conditions** in caching.
+- Avoid **cache stampedes** on high-traffic resources.
+- Ensure **data consistency** across distributed systems.
+
+> Think of it as **reserving the notepad** while one person writes on it so others don’t overwrite the data simultaneously.
+
+---
+
 ## Example Scenarios of In-Memory Caching
 
 ### 1. E-Commerce Website
@@ -220,26 +275,5 @@ Dashboards in analytics platforms often display complex computations, such as ag
 - Real-time or near real-time dashboard updates.
 - Reduced computation on backend servers.
 - Consistent performance for multiple users accessing the same reports simultaneously.
-
----
-
-## Best Practices for Caching
-
-Effective caching is not just about storing data—it requires thoughtful strategies to maintain performance, consistency, and reliability. Here are some key best practices:
-
-1. **Set Appropriate TTL (Time to Live)**  
-   Assign a TTL to each cached item to control how long it stays in the cache. A proper TTL balances data freshness with performance. Too short and you get frequent cache misses; too long and users may see outdated information.
-
-2. **Invalidate Cache When Data Changes**  
-   Whenever the underlying data is updated in the database, make sure to invalidate or update the corresponding cache entries. This prevents serving stale data to users.
-
-3. **Cache High-Value or Expensive-to-Compute Data**  
-   Focus on caching data that is accessed frequently or requires heavy computation. Avoid caching rarely used data, as it wastes memory and may increase eviction of important entries.
-
-4. **Monitor Metrics and Adjust Cache Configuration**  
-   Regularly track cache hit rate, miss rate, eviction rate, and data freshness. Use these metrics to adjust cache size, eviction policies, and other strategies to maintain optimal performance.
-
-5. **Use Distributed Caching for Scalable Systems**  
-   When an application runs on multiple servers, a distributed cache (like Redis or Memcached) ensures all instances share the same cache, maintaining consistency and supporting scalability.
 
 ---
