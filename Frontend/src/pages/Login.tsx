@@ -36,7 +36,7 @@ export default function Login() {
         navigate('/dashboard')
       } else {
         toast.error('Login failed', {
-          description: 'Invalid email or password. Try demo@cache.io / demo123',
+          description: 'Invalid email or password. Please check your credentials and try again.',
         })
       }
     } catch {
@@ -89,7 +89,7 @@ export default function Login() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="demo@cache.io"
+                  placeholder="Enter your email"
                   {...register('email')}
                   className={errors.email ? 'border-red-500 focus-visible:ring-red-500' : ''}
                 />
@@ -132,18 +132,6 @@ export default function Login() {
                 )}
               </Button>
             </form>
-
-            {/* Demo credentials */}
-            <div className="mt-6 p-4 rounded-lg bg-secondary/50 border border-border">
-              <div className="flex items-center gap-2 mb-2">
-                <Zap className="w-4 h-4 text-yellow-500" />
-                <span className="text-sm font-medium text-yellow-500">Demo Credentials</span>
-              </div>
-              <div className="space-y-1 font-mono text-xs text-muted-foreground">
-                <p>Email: <span className="text-foreground">demo@cache.io</span></p>
-                <p>Password: <span className="text-foreground">demo123</span></p>
-              </div>
-            </div>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">
             <div className="text-sm text-muted-foreground text-center">
