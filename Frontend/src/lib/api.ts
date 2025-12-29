@@ -1,5 +1,7 @@
 // @ts-ignore - Vite environment variables
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+// In Docker, use relative path /api (nginx will proxy to backend)
+// In development, use full URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080/api' : '/api')
 
 export interface ApiResponse<T = any> {
   code: number
