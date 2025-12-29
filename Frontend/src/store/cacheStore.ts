@@ -73,6 +73,13 @@ interface CacheState {
   getCacheSize: () => number
   getMemoryUsage: () => number
   getCachedProducts: () => Product[]
+  
+  // Test function to fill memory and trigger evictions
+  fillMemoryForTesting: () => Promise<void>
+  
+  // Control for stopping the fill process
+  isFillingMemory: boolean
+  stopFillingMemory: () => void
 }
 
 export const useCacheStore = create<CacheState>()(
@@ -89,6 +96,11 @@ export const useCacheStore = create<CacheState>()(
       },
       events: [],
       loadingProducts: new Set(),
+      isFillingMemory: false,
+      
+      stopFillingMemory: () => {
+        set({ isFillingMemory: false })
+      },
 
       getProduct: async (id: string) => {
         const state = get()
@@ -488,6 +500,149 @@ export const useCacheStore = create<CacheState>()(
       getCachedProducts: () => {
         const state = get()
         return Array.from(state.cache.values())
+      },
+
+      fillMemoryForTesting: async () => {
+        // Set flag to start filling
+        set({ isFillingMemory: true })
+        
+        const state = get()
+        const currentSize = state.getCacheSize()
+        const availableSpace = MAX_CACHE_SIZE - currentSize
+        
+        console.log(`[Test] Starting memory fill: Current size: ${currentSize} bytes, Available: ${availableSpace} bytes`)
+        
+        const evictionsBefore = state.metrics.evictions
+        let productsAdded = 0
+        let iterations = 0
+        const maxIterations = 2000 // Safety limit
+        
+        // Fill memory until we reach ~99.5% (leave small margin) or stop flag is set
+        while (get().isFillingMemory && iterations < maxIterations) {
+          iterations++
+          
+          // Check current state
+          const currentState = get()
+          const currentCacheSize = currentState.getCacheSize()
+          const usagePercent = (currentCacheSize / MAX_CACHE_SIZE) * 100
+          
+          // Stop if we're at 99.5% or more (leave small margin to avoid going over)
+          if (usagePercent >= 99.5) {
+            console.log(`[Test] Memory reached ${usagePercent.toFixed(1)}% - stopping`)
+            break
+          }
+          
+          // Check if stop was requested
+          if (!currentState.isFillingMemory) {
+            console.log(`[Test] Stop requested - stopping at ${usagePercent.toFixed(1)}%`)
+            break
+          }
+          
+          try {
+            // Create product with random size
+            const productSize = Math.floor(Math.random() * 600) + 600 // 600-1200 bytes
+            const testId = `test-${Date.now()}-${iterations}`
+            
+            const simulatedProduct: Product = {
+              id: testId,
+              name: `Test Product ${iterations}`,
+              price: Math.floor(Math.random() * 1000) + 10,
+              category: ['Electronics', 'Audio', 'Wearables', 'Gaming', 'Accessories'][Math.floor(Math.random() * 5)],
+              stock: Math.floor(Math.random() * 100) + 1,
+              lastAccessed: Date.now(),
+              accessCount: 0,
+              createdAt: Date.now(),
+              size: productSize,
+            }
+            
+            // Add to cache with eviction logic
+            let updatedCache = new Map(currentState.cache)
+            let evictionCount = 0
+            const evictionEvents: CacheEvent[] = []
+            
+            let cacheSizeBeforeAdd = 0
+            updatedCache.forEach(p => cacheSizeBeforeAdd += p.size)
+            
+            // Evict LRU items if needed (only if adding would exceed limit)
+            while (cacheSizeBeforeAdd + simulatedProduct.size > MAX_CACHE_SIZE && updatedCache.size > 0) {
+              let lruKey = ''
+              let lruTime = Infinity
+              
+              updatedCache.forEach((p, key) => {
+                if ((p.lastAccessed || 0) < lruTime) {
+                  lruTime = p.lastAccessed || 0
+                  lruKey = key
+                }
+              })
+              
+              if (lruKey) {
+                const evictedProduct = updatedCache.get(lruKey)!
+                evictionEvents.push({
+                  id: crypto.randomUUID(),
+                  type: 'eviction',
+                  productId: lruKey,
+                  productName: evictedProduct.name,
+                  timestamp: Date.now(),
+                })
+                cacheSizeBeforeAdd -= evictedProduct.size
+                updatedCache.delete(lruKey)
+                evictionCount++
+              } else {
+                break // Safety break
+              }
+            }
+            
+            // Add new product only if we have space
+            if (cacheSizeBeforeAdd + simulatedProduct.size <= MAX_CACHE_SIZE) {
+              updatedCache.set(testId, simulatedProduct)
+              productsAdded++
+              
+              const addEvent: CacheEvent = {
+                id: crypto.randomUUID(),
+                type: 'add',
+                productId: testId,
+                productName: simulatedProduct.name,
+                timestamp: Date.now(),
+              }
+              
+              set({
+                cache: updatedCache,
+                metrics: {
+                  ...currentState.metrics,
+                  evictions: currentState.metrics.evictions + evictionCount,
+                },
+                events: [addEvent, ...evictionEvents, ...currentState.events].slice(0, 50),
+              })
+            } else {
+              // No space, stop
+              console.log(`[Test] No space to add product - stopping`)
+              break
+            }
+            
+            // Small delay every 10 products to allow UI updates
+            if (productsAdded % 10 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 100))
+            }
+          } catch (error) {
+            console.error(`[Test] Error adding product:`, error)
+            // Continue with next iteration
+          }
+        }
+        
+        // Stop the process
+        set({ isFillingMemory: false })
+        
+        const finalState = get()
+        const evictionsAfter = finalState.metrics.evictions
+        const evictionsTriggered = evictionsAfter - evictionsBefore
+        const finalSize = finalState.getCacheSize()
+        const finalUsage = (finalSize / MAX_CACHE_SIZE) * 100
+        
+        console.log(`[Test] Memory fill complete!`)
+        console.log(`[Test] Products added: ${productsAdded}`)
+        console.log(`[Test] Evictions triggered: ${evictionsTriggered}`)
+        console.log(`[Test] Final cache size: ${finalSize} bytes (${finalUsage.toFixed(1)}%)`)
+        console.log(`[Test] Total evictions now: ${evictionsAfter}`)
       },
     }),
     {

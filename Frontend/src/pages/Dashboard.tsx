@@ -1,12 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useCacheStore, MAX_MEMORY, loadAllProducts } from '@/store/cacheStore'
 import { MetricsCard } from '@/components/dashboard/MetricsCard'
 import { MemoryGauge } from '@/components/dashboard/MemoryGauge'
 import { EventLog } from '@/components/dashboard/EventLog'
 import { ProductTable } from '@/components/dashboard/ProductTable'
 import { formatPercentage } from '@/lib/utils'
-import { Zap, AlertCircle, Trash2, Activity, RefreshCw, Server } from 'lucide-react'
+import { Zap, AlertCircle, Trash2, Activity, RefreshCw, Server, TestTube } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { BtnCache, useClearBtnCache, useBtnCacheStats } from '@/components/ui/btn-cache'
 
 export default function Dashboard() {
   // Use Zustand selectors to ensure real-time updates
@@ -16,6 +17,22 @@ export default function Dashboard() {
   const getCacheSize = useCacheStore((state) => state.getCacheSize)
   const clearCache = useCacheStore((state) => state.clearCache)
   const resetMetrics = useCacheStore((state) => state.resetMetrics)
+  const fillMemoryForTesting = useCacheStore((state) => state.fillMemoryForTesting)
+  const stopFillingMemory = useCacheStore((state) => state.stopFillingMemory)
+  const isFillingMemory = useCacheStore((state) => state.isFillingMemory)
+  
+  const handleFillMemory = async () => {
+    try {
+      await fillMemoryForTesting()
+    } catch (error) {
+      console.error('Error filling memory:', error)
+    }
+  }
+  
+  const handleStopFilling = () => {
+    stopFillingMemory()
+    console.log('[Test] Stop requested by user')
+  }
   
   const cacheSize = getCacheSize()
   const products = Array.from(cache.values())
@@ -43,14 +60,51 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={resetMetrics}>
+          <BtnCache 
+            variant="outline" 
+            size="sm" 
+            onClick={resetMetrics}
+            cacheKey="reset-metrics-btn"
+            cacheResult={false}
+          >
             <RefreshCw className="w-4 h-4 mr-2" />
             Reset Metrics
-          </Button>
-          <Button variant="destructive" size="sm" onClick={() => clearCache()}>
+          </BtnCache>
+          <BtnCache 
+            variant="destructive" 
+            size="sm" 
+            onClick={() => clearCache()}
+            cacheKey="clear-cache-btn"
+            cacheResult={false}
+          >
             <Trash2 className="w-4 h-4 mr-2" />
             Clear Cache
-          </Button>
+          </BtnCache>
+          {isFillingMemory ? (
+            <BtnCache 
+              variant="destructive" 
+              size="sm" 
+              onClick={handleStopFilling}
+              cacheKey="stop-fill-btn"
+              cacheResult={false}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Stop Filling
+            </BtnCache>
+          ) : (
+            <BtnCache 
+              variant="outline" 
+              size="sm" 
+              onClick={handleFillMemory}
+              disabled={isFillingMemory}
+              cacheKey="fill-memory-btn"
+              cacheResult={false}
+              className="border-orange-500 text-orange-600 hover:bg-orange-50"
+            >
+              <TestTube className="w-4 h-4 mr-2" />
+              Test Evictions
+            </BtnCache>
+          )}
         </div>
       </div>
 

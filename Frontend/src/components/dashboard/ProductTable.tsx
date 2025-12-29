@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import { BtnCache } from '@/components/ui/btn-cache'
 import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
@@ -266,12 +267,14 @@ export function ProductTable() {
         
         return (
           <div className="flex items-center gap-2">
-            <Button
+            <BtnCache
               variant="outline"
               size="sm"
               onClick={() => handleFetchProduct(product.id, product.name)}
               disabled={loadingProducts.has(product.id) || loadingId === product.id}
               className="text-xs"
+              cacheKey={`fetch-product-${product.id}`}
+              cacheResult={false}
             >
               {(loadingProducts.has(product.id) || loadingId === product.id) ? (
                 <>
@@ -284,7 +287,7 @@ export function ProductTable() {
                   Fetch
                 </>
               )}
-            </Button>
+            </BtnCache>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 
@@ -369,10 +372,14 @@ export function ProductTable() {
                   className="pl-9 w-[200px]"
                 />
               </div>
-              <Button onClick={() => setIsAddDialogOpen(true)}>
+              <BtnCache 
+                onClick={() => setIsAddDialogOpen(true)}
+                cacheKey="add-product-btn"
+                cacheResult={false}
+              >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Product
-              </Button>
+              </BtnCache>
             </div>
           </div>
         </CardHeader>
@@ -388,13 +395,15 @@ export function ProductTable() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {uncachedProducts.map(product => (
-                  <Button
+                  <BtnCache
                     key={product.id}
                     variant="outline"
                     size="sm"
                     disabled={loadingProducts.has(product.id) || loadingId === product.id}
                     onClick={() => handleFetchProduct(product.id, product.name)}
                     className="text-xs"
+                    cacheKey={`fetch-backend-${product.id}`}
+                    cacheResult={false}
                   >
                     {(loadingProducts.has(product.id) || loadingId === product.id) ? (
                       <>
@@ -407,7 +416,7 @@ export function ProductTable() {
                         {product.name}
                       </>
                     )}
-                  </Button>
+                  </BtnCache>
                 ))}
               </div>
             </div>
